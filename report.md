@@ -7,3 +7,4 @@
 ## Здесь видно содержимое "report.txt" 
 
 <img width="1013" height="668" alt="Снимок экрана (319)" src="https://github.com/user-attachments/assets/88407f00-04cd-4957-9795-0a5dd9aad441" />
+

@@ -8,11 +8,11 @@
 
 ## Вывод команды запуска python3 "main.py"
 
-## "python main.py System started. Secret hash: MyS***"
+# python main.py System started. Secret hash: MyS***
 
-## Вывод команды ls -la, подтверждающий наличие файла ".env""
+## Вывод команды ls -la, подтверждающий наличие файла ".env"
 
-## '''ls -la total 32  
+## ls -la total 32  
 drwxrwxr-x  5 ubuntu ubuntu 260 May 20 21:04 .  
 drwxr-x--- 10 ubuntu ubuntu 260 May 20 20:52 ..  
 -rw-rw-r--  1 ubuntu ubuntu  39 May 20 21:03 .env  

@@ -1,12 +1,21 @@
-from fastapi import FastAPI,Request,Form,HTTPException,Depends,Header,status,UploadFile, File
+from fastapi import FastAPI,Request,Form,HTTPException,Depends,Header,status,UploadFile, File, Query, Response
 from src.schemes import UserCreate
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse,FileResponse
 from typing import List, Dict, Any
+from dotenv import load_dotenv
 import bleach
 import filetype
 import uuid
 import os
+from cryptography.fernet import Fernet
+
+load_dotenv()
+
+ENCRYPTION_KEY = os.getenv("APP_SECRET")
+if not ENCRYPTION_KEY:
+    raise RuntimeError("ENCRYPTION_KEY is not set in .env file!")
+cipher_suite = Fernet(ENCRYPTION_KEY.encode())
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -120,6 +129,7 @@ MAX_FILE_SIZE = 2 * 1024 * 1024
 @app.post("/files/upload")
 async def upload_file(
     file: UploadFile = File(...), 
+    encrypt: bool = Query(False, description="Зашифровать файл перед сохранением"),
     current_user: dict = Depends(get_current_user)
 ):
     head = await file.read(2048) 
@@ -130,26 +140,26 @@ async def upload_file(
             detail="Invalid file type. Only real JPEG and PNG are allowed."
         )
     await file.seek(0)
+
     file_uuid = str(uuid.uuid4())
     save_path = os.path.join(storage_dir, file_uuid)
     total_size = 0
-    try:
-        with open(save_path, "wb") as buffer:
-            while True:
-                chunk = await file.read(1024 * 1024) 
-                if not chunk:
-                    break
-                total_size += len(chunk)
-                if total_size > MAX_FILE_SIZE:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, 
-                        detail="File is too large. Max allowed size is 2MB."
-                    )
-                buffer.write(chunk)
-    except HTTPException as e:
-        if os.path.exists(save_path):
-            os.remove(save_path)
-        raise e
+    file_data = await file.read()
+
+    if len(file_data) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, 
+            detail="File is too large. Max allowed size is 2MB."
+        )
+
+    if encrypt:
+        file_data = cipher_suite.encrypt(file_data)
+
+    with open(save_path, "wb") as buffer:
+        buffer.write(file_data)
+
+    if encrypt:
+        file_data = cipher_suite.encrypt(file_data)
     global files_db
     new_id = max([f.get("id", 0) for f in files_db], default=0) + 1
     new_record = {
@@ -157,7 +167,8 @@ async def upload_file(
         "original_name": file.filename,
         "owner": current_user["username"],
         "size": total_size,
-        "path": save_path
+        "path": save_path,
+        "is_encrypted": encrypt
     }
     files_db.append(new_record)
     return {"message": "File uploaded successfully", "file": new_record}
@@ -171,8 +182,17 @@ async def download_file(file_record: dict = Depends(checkfile_permissions)):
             detail="Physical file not found on server"
         )
         
-    return FileResponse(
-        path=file_record["path"],
-        filename=file_record["original_name"],
-        content_disposition_type="attachment"
+    with open(file_record["path"], "rb") as buffer:
+        file_data=buffer.read()
+
+    if file_record.get("is_encrypted"):
+        try:
+            file_data = cipher_suite.decrypt(file_data)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Decryption failed. Invalid key or corrupted data.")
+        
+    return Response(
+        content=file_data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{file_record["original_name"]}"'}
     )

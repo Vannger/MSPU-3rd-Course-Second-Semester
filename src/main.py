@@ -1,9 +1,12 @@
-from fastapi import FastAPI,Request,Form,HTTPException,Depends,Header,status
+from fastapi import FastAPI,Request,Form,HTTPException,Depends,Header,status,UploadFile, File
 from src.schemes import UserCreate
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse,FileResponse
 from typing import List, Dict, Any
 import bleach
+import filetype
+import uuid
+import os
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -109,3 +112,67 @@ async def get_all_files(current_user: dict = Depends(get_current_user)):
             detail="Only administrators have access to this resource"
         )
     return files_db
+
+storage_dir = "storage"
+os.makedirs(storage_dir, exist_ok=True)
+MAX_FILE_SIZE = 2 * 1024 * 1024
+
+@app.post("/files/upload")
+async def upload_file(
+    file: UploadFile = File(...), 
+    current_user: dict = Depends(get_current_user)
+):
+    head = await file.read(2048) 
+    kind = filetype.guess(head)
+    if kind is None or kind.mime not in ["image/jpeg", "image/png"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Invalid file type. Only real JPEG and PNG are allowed."
+        )
+    await file.seek(0)
+    file_uuid = str(uuid.uuid4())
+    save_path = os.path.join(storage_dir, file_uuid)
+    total_size = 0
+    try:
+        with open(save_path, "wb") as buffer:
+            while True:
+                chunk = await file.read(1024 * 1024) 
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, 
+                        detail="File is too large. Max allowed size is 2MB."
+                    )
+                buffer.write(chunk)
+    except HTTPException as e:
+        if os.path.exists(save_path):
+            os.remove(save_path)
+        raise e
+    global files_db
+    new_id = max([f.get("id", 0) for f in files_db], default=0) + 1
+    new_record = {
+        "id": new_id,
+        "original_name": file.filename,
+        "owner": current_user["username"],
+        "size": total_size,
+        "path": save_path
+    }
+    files_db.append(new_record)
+    return {"message": "File uploaded successfully", "file": new_record}
+
+@app.get("/files/{file_id}/download")
+async def download_file(file_record: dict = Depends(checkfile_permissions)):
+
+    if "path" not in file_record or not os.path.exists(file_record["path"]):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Physical file not found on server"
+        )
+        
+    return FileResponse(
+        path=file_record["path"],
+        filename=file_record["original_name"],
+        content_disposition_type="attachment"
+    )

@@ -3,3 +3,6 @@ venv/
 __pycache__/
 storage/
 .git/
+dockerfile
+docker-compose.yml
+.venv/

@@ -1,7 +1,7 @@
 from fastapi import FastAPI,Request,Form,HTTPException,Depends,Header,status,UploadFile, File, Query, Response
 from src.schemes import UserCreate
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse,FileResponse
+from fastapi.responses import HTMLResponse,FileResponse,JSONResponse
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 import bleach
@@ -9,6 +9,8 @@ import filetype
 import uuid
 import os
 from cryptography.fernet import Fernet
+from logger_config import logger
+
 
 load_dotenv()
 
@@ -47,6 +49,16 @@ async def add_security_headers(request: Request, call_next):
 def clean_html(text: str) -> str:
     allowed_tags = ['b', 'i', 'u', 'em', 'strong']
     return bleach.clean(text, tags=allowed_tags, attributes={}, strip=True)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Критическая ошибка при запросе {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "We are sorry, something went wrong."}
+    )
+
+
 
 @app.post("/registration")
 def register_user(user: UserCreate) -> dict:
@@ -181,7 +193,7 @@ async def download_file(file_record: dict = Depends(checkfile_permissions)):
             status_code=status.HTTP_404_NOT_FOUND, 
             detail="Physical file not found on server"
         )
-        
+
     with open(file_record["path"], "rb") as buffer:
         file_data=buffer.read()
 
@@ -196,3 +208,12 @@ async def download_file(file_record: dict = Depends(checkfile_permissions)):
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{file_record["original_name"]}"'}
     )
+
+@app.get("/cause_error")
+async def cause_error():
+    logger.info("Пользователь вызвал тестовую ошибку /cause_error")
+    return 1 / 0
+@app.post("/login")
+async def login_error(username:str = "user", password:str = "12345"):
+    logger.warning("Пользователь вызвал ошибку логина")
+    raise HTTPException(status_code=400, detail="Wrong password or login. Yall off the goop fr")

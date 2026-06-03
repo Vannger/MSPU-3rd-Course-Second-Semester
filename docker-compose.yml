@@ -5,7 +5,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./storage:/app/storage
+      - ./storage:/Papki.net/storage
+      - ./logs:/Papki.net/logs
     env_file:
       - .env
     restart: unless-stopped
